@@ -73,7 +73,7 @@ systemctl --user start log-app.service
 ## Changelog
 
 - **2026-06-01** — Codex pass: project renamed in notes/master list to **TOC-app** while keeping the visible in-app name **Field Log**. Restyled toward the current black/dark-grey/gold UI with accent `#e8b04f`. Added a dedicated Missions tab for Mission / Folder view/filter/rename/remove-tag management. Added OM-style in-app updater controls in the settings panel with Check/Update/Restart status flow. Fixed Mission/Mission Folder parsing compatibility, safer mission inline handlers, duplicate-entry action, DELETE 404 for missing entries, TXT import UTC handling, backend file-upload import support, and kept Restart/Shutdown targeting deployed `log-app.service`.
-- **2026-06-01** — GitHub remote set for updater: `https://github.com/Slofi/TOC-app.git`.
+- **2026-06-01** — GitHub remote set for updater and initial app state pushed to `https://github.com/Slofi/TOC-app.git` (`main`, version `0.1.0`).
 - **2026-06-01** — Bug sweep: added missing `closeBurger()` (ReferenceError on Restart/Shutdown/SetPos/PickPos), fixed `data-mission` attr on chips (mission highlight broken), removed duplicate `First Heard` field from CONTACT template, fixed 3× `var(--muted)` → `var(--text-dim)` in CSS, removed duplicate `display:none` in burger CSS, added try/except around `limit` param in `api_entries`
 - **2026-06-01** — Initial build: Flask backend, dark/amber UI, LOG/MAP/EXPORT tabs, structured field templates matching OM, map with full layer set (matches OM), manual position, mission management (rename/delete), Restart + Shutdown, +GPS, Now button. Launcher tile added to CD dashboard.
 
