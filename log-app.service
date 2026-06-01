@@ -1,0 +1,13 @@
+[Unit]
+Description=TOC-app
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/log-app
+ExecStart=%h/Projects/log-app/venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

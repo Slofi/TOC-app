@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Field Log</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+    <div class="header-left">
+        <span class="app-name">FIELD LOG</span>
+        <span class="dot green" id="dot-db"></span>
+        <span class="status-label" id="lbl-entries">—</span>
+    </div>
+    <div class="header-center">
+        <span class="dot" id="dot-gps"></span>
+        <span class="status-label" id="lbl-gps">GPS —</span>
+    </div>
+    <div class="header-right">
+        <a href="http://localhost:8082" target="_blank" class="btn btn-secondary btn-header">OM</a>
+        <button class="btn-icon" id="burger-btn" onclick="toggleBurger()" title="Settings">&#9776;</button>
+    </div>
+</header>
+
+<!-- ── Burger panel ── -->
+<div id="burger-panel">
+    <div class="burger-setting">
+        <div class="burger-setting-label">UI Zoom</div>
+        <div class="burger-zoom-row">
+            <button class="zoom-step-btn" onclick="setUiZoom(getUiZoom()-5)">−</button>
+            <input type="range" id="ui-zoom-slider" min="70" max="150" step="5" value="100"
+                   oninput="setUiZoom(this.value)">
+            <button class="zoom-step-btn" onclick="setUiZoom(getUiZoom()+5)">+</button>
+            <span id="ui-zoom-display">100%</span>
+        </div>
+    </div>
+    <hr class="burger-sep">
+    <div class="burger-setting">
+        <div class="burger-setting-label">Accent Colour</div>
+        <div class="accent-swatch-row">
+            <div id="accent-swatch" onclick="openAccentPicker()" title="Choose accent colour"></div>
+            <button class="burger-small-btn" onclick="resetAccentColor()">Reset</button>
+        </div>
+    </div>
+    <hr class="burger-sep">
+    <div class="burger-setting">
+        <div class="burger-setting-label">Manual Position</div>
+        <div class="manual-pos-row">
+            <input type="text" id="manual-lat" placeholder="Lat" class="manual-pos-input">
+            <input type="text" id="manual-lon" placeholder="Lon" class="manual-pos-input">
+            <button class="burger-small-btn" onclick="setManualPos()">Set</button>
+            <button class="burger-small-btn" onclick="clearManualPos()">Clear</button>
+        </div>
+        <div id="manual-pos-status" class="manual-pos-status"></div>
+    </div>
+    <hr class="burger-sep">
+    <div class="burger-setting">
+        <div class="burger-setting-label">App Control</div>
+        <div class="burger-control-row">
+            <button class="burger-small-btn" onclick="restartApp()">Restart</button>
+            <button class="burger-small-btn burger-btn-danger" onclick="shutdownApp()">Shut Down</button>
+        </div>
+    </div>
+    <hr class="burger-sep">
+    <div class="burger-setting">
+        <div class="burger-setting-label">TOC-app Update</div>
+        <div id="settings-update-summary" class="update-summary">Checking version...</div>
+        <div id="settings-update-log" class="update-log"></div>
+        <div class="burger-control-row update-controls">
+            <button class="burger-small-btn" id="settings-update-check-btn"
+                    onclick="settingsLoadUpdateStatus(true, this)">Check</button>
+            <button class="burger-small-btn" id="settings-update-run-btn"
+                    onclick="runTocAppUpdate()" disabled>Update</button>
+            <button class="burger-small-btn" id="settings-update-restart-btn"
+                    onclick="restartApp()" style="display:none">Restart</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Accent picker overlay ── -->
+<div id="accent-picker-overlay" onclick="closeAccentPicker()">
+    <div id="accent-picker-modal" onclick="event.stopPropagation()">
+        <h3>Accent Colour</h3>
+        <div class="accent-preset-grid" id="accent-preset-grid"></div>
+        <div class="accent-custom-row">
+            <label>Custom</label>
+            <input type="color" id="accent-custom-input" oninput="previewAccent(this.value)">
+            <span id="accent-hex-display">#e8b04f</span>
+        </div>
+        <div class="accent-picker-btns">
+            <button onclick="closeAccentPicker()">Cancel</button>
+            <button class="btn-confirm" onclick="confirmAccentColor()">Apply</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Tabs ── -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('log', this)">Log</button>
+    <button class="tab"        onclick="showTab('missions', this); renderMissionManager()">Missions</button>
+    <button class="tab"        onclick="showTab('map', this)">Map</button>
+    <button class="tab"        onclick="showTab('export', this); loadStats()">Export</button>
+</div>
+
+<!-- ════════════════════════ LOG TAB ════ -->
+<div id="tab-log" class="tab-content active">
+
+    <!-- Composer -->
+    <div class="panel" id="composer-panel">
+        <div class="panel-header">
+            <span id="composer-title">New Entry</span>
+            <div class="panel-header-btns">
+                <button class="btn btn-secondary btn-sm" id="btn-cancel-edit"
+                        onclick="cancelEdit()" style="display:none">Cancel</button>
+                <button class="btn btn-primary" onclick="saveEntry()">Save</button>
+            </div>
+        </div>
+        <div class="composer-body">
+            <div class="composer-row">
+                <select id="cat-select" onchange="onCatChange()">
+                    <option value="NOTE">NOTE</option>
+                    <option value="SITREP">SITREP</option>
+                    <option value="PLAN">PLAN</option>
+                    <option value="ALERT">ALERT</option>
+                    <option value="ACTION">ACTION</option>
+                    <option value="COMMS">COMMS</option>
+                    <option value="CONTACT">CONTACT</option>
+                    <option value="POSITION">POSITION</option>
+                    <option value="INTEL">INTEL</option>
+                    <option value="WEATHER">WEATHER</option>
+                </select>
+                <input type="text" id="mission-input"
+                       placeholder="Mission / Folder (optional)"
+                       list="missions-datalist" autocomplete="off">
+                <datalist id="missions-datalist"></datalist>
+                <button class="btn btn-secondary btn-sm" onclick="insertNow()">Now</button>
+                <button class="btn btn-secondary btn-sm" id="btn-gps" onclick="attachGPS()">+GPS</button>
+            </div>
+            <div id="composer-fields"></div>
+            <div id="gps-line" class="gps-line" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+        <div class="cat-filter-row" id="cat-filter-row"></div>
+        <div class="search-row">
+            <input type="text" id="search-input" placeholder="Search entries..."
+                   oninput="debounceSearch(this.value)">
+            <select id="mission-filter" onchange="setMissionFilter(this.value)">
+                <option value="">All missions</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Missions strip -->
+    <div id="missions-strip" class="missions-strip"></div>
+
+    <!-- Timeline -->
+    <div id="timeline" class="timeline"></div>
+
+</div><!-- end tab-log -->
+
+<!-- ════════════════════════ MISSIONS TAB ════ -->
+<div id="tab-missions" class="tab-content">
+    <div class="panel">
+        <div class="panel-header">
+            <span>Mission / Folder Management</span>
+            <div class="panel-header-btns">
+                <button class="btn btn-secondary btn-sm" onclick="loadMissions()">Refresh</button>
+            </div>
+        </div>
+        <div class="mission-manager-intro">
+            Mission / Folder groups related TOC entries without changing the shared OM database schema.
+            Rename updates the tag across all matching entries. Remove tag keeps entries and clears only that folder name.
+        </div>
+        <div id="mission-manager-list" class="mission-manager-list"></div>
+    </div>
+</div>
+
+<!-- ════════════════════════ MAP TAB ════ -->
+<div id="tab-map" class="tab-content">
+    <div class="map-gps-bar">
+        <span class="dot" id="map-dot-gps"></span>
+        <span id="map-gps-text">GPS —</span>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto"
+                onclick="centerOnGPS()">Center</button>
+        <button class="btn btn-secondary btn-sm" id="btn-pick-pos"
+                onclick="togglePickMode()">Pick Pos</button>
+    </div>
+    <div id="map-container"></div>
+</div>
+
+<!-- ════════════════════════ EXPORT TAB ════ -->
+<div id="tab-export" class="tab-content">
+    <div class="panel">
+        <div class="panel-header"><span>Export</span></div>
+        <div class="export-section">
+            <div class="export-btns">
+                <button class="btn btn-primary" onclick="exportData('json')">Export JSON</button>
+                <button class="btn btn-secondary" onclick="exportData('txt')">Export TXT</button>
+            </div>
+        </div>
+    </div>
+    <div class="panel">
+        <div class="panel-header"><span>Import</span></div>
+        <div class="export-section">
+            <textarea id="import-input" placeholder="Paste JSON or TXT export here..."></textarea>
+            <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-primary" onclick="doImport()">Import</button>
+                <span id="import-status" class="status-label"></span>
+            </div>
+        </div>
+    </div>
+    <div class="panel">
+        <div class="panel-header"><span>Statistics</span></div>
+        <div id="stats-grid" class="stats-grid"></div>
+    </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+// ── Config ────────────────────────────────────────────────────────────
+const CATS = ['NOTE','SITREP','PLAN','ALERT','ACTION','COMMS','CONTACT','POSITION','INTEL','WEATHER'];
+
+const CAT_COLORS = {
+    NOTE:'#9ca3af', SITREP:'#f59e0b', PLAN:'#60a5fa', ALERT:'#ef4444',
+    ACTION:'#fb923c', COMMS:'#4ade80', CONTACT:'#c084fc', POSITION:'#22d3ee',
+    INTEL:'#fbbf24', WEATHER:'#7dd3fc',
+};
+
+const FIELDS = {
+    NOTE: null,
+    SITREP: [
+        {name:'Time', hint:'Time of report (e.g. 14:35)'},
+        {name:'Location / Area', hint:'Site, route, grid, or operating area'},
+        {name:'Situation', hint:'What is happening now', multiline:true},
+        {name:'Status', hint:'Normal, degraded, blocked, urgent...'},
+        {name:'Known Nodes / Assets', hint:'Nodes, teams, vehicles, stations'},
+        {name:'Issues / Risks', hint:'Outages, safety issues, weather, access, interference'},
+        {name:'Intent / Plan', hint:'Next steps or operating plan', multiline:true},
+        {name:'Next Update', hint:'When another report is expected'},
+        {name:'Notes', hint:'Extra context', multiline:true},
+    ],
+    PLAN: [
+        {name:'Time', hint:'Plan start time or window (e.g. 09:00–17:00)'},
+        {name:'Area / Route', hint:'Basecamp, route, work area, or planned collection point'},
+        {name:'Objective', hint:'What should be achieved', multiline:true},
+        {name:'Window / Timing', hint:'Start time, end time, update cadence, or time limit'},
+        {name:'People / Assets', hint:'Operators, nodes, vehicles, stations'},
+        {name:'Setup', hint:'Radios, channels, antenna, power, GPS', multiline:true},
+        {name:'Checkpoints / Triggers', hint:'When to log POSITION, COMMS, CONTACT, ALERT, or SITREP', multiline:true},
+        {name:'Risks / Constraints', hint:'Weather, power, access, RF path, time, safety', multiline:true},
+        {name:'Comms Plan', hint:'Who to ping, where to report, fallback', multiline:true},
+        {name:'Abort Criteria', hint:'When to stop, return, or switch mode'},
+        {name:'Notes', hint:'Extra planning context', multiline:true},
+    ],
+    ALERT: [
+        {name:'Time', hint:'Time of alert or event'},
+        {name:'Priority', hint:'Low, medium, high, urgent'},
+        {name:'Type', hint:'Safety, weather, power, comms, security, other'},
+        {name:'Location', hint:'Place, grid, coordinates, or affected area'},
+        {name:'Affected', hint:'Who or what is affected'},
+        {name:'Details', hint:'What happened and why it matters', multiline:true},
+        {name:'Immediate Action', hint:'Action already taken or needed now', multiline:true},
+        {name:'Status', hint:'Open, monitoring, contained, resolved'},
+        {name:'Follow-up', hint:'Who checks next and when'},
+        {name:'Notes', hint:'Extra details', multiline:true},
+    ],
+    ACTION: [
+        {name:'Time', hint:'Time assigned or scheduled'},
+        {name:'Task / Action', hint:'Specific action to perform', multiline:true},
+        {name:'Assigned To', hint:'Person, node, or team'},
+        {name:'Location', hint:'Where the action applies'},
+        {name:'Due / Time', hint:'Deadline or execution time'},
+        {name:'Status', hint:'Planned, in progress, blocked, complete'},
+        {name:'Result', hint:'Outcome after action', multiline:true},
+        {name:'Follow-up', hint:'Next action or check-in'},
+        {name:'Notes', hint:'Extra context', multiline:true},
+    ],
+    COMMS: [
+        {name:'Time', hint:'Time of contact or check'},
+        {name:'From', hint:'Calling station'},
+        {name:'To', hint:'Receiving station or group'},
+        {name:'Network / Channel', hint:'Channel, frequency, or room'},
+        {name:'Message / Check', hint:'What was sent or tested', multiline:true},
+        {name:'Signal', hint:'SNR/RSSI/readability'},
+        {name:'Result', hint:'Good copy, weak, no ack, delayed, failed...'},
+        {name:'Follow-up', hint:'Retry, change channel, monitor...'},
+        {name:'Notes', hint:'Extra RF/path context', multiline:true},
+    ],
+    CONTACT: [
+        {name:'Time', hint:'Time of first contact'},
+        {name:'Node / Station', hint:'Node or station heard'},
+        {name:'Callsign / Handle', hint:'Operator, callsign, or informal handle'},
+        {name:'Network / Channel', hint:'Channel, frequency, or room'},
+        {name:'Signal', hint:'SNR/RSSI/quality report'},
+        {name:'Distance', hint:'Estimated distance if known'},
+        {name:'Position', hint:'Coordinates, place, grid, or unknown'},
+        {name:'Action / Follow-up', hint:'DM sent, pinged, added to contacts, monitor...'},
+        {name:'Notes', hint:'Extra contact details', multiline:true},
+    ],
+    POSITION: [
+        {name:'Time', hint:'Time of position fix or observation'},
+        {name:'Node / Asset', hint:'Node, person, vehicle, or station'},
+        {name:'Coordinates / Place', hint:'Lat/lon, grid, landmark, or route point'},
+        {name:'Source', hint:'GPS, manual, report, map pick, inferred'},
+        {name:'Accuracy', hint:'Exact, approximate, stale, unknown'},
+        {name:'Movement / Heading', hint:'Static, moving, heading/speed if known'},
+        {name:'Notes', hint:'Extra position context', multiline:true},
+    ],
+    INTEL: [
+        {name:'Time', hint:'Time of observation or report'},
+        {name:'Who / Source', hint:'Person, node, station, team, or reporting source'},
+        {name:'Where / Location', hint:'Place, coordinates, grid, route, or area'},
+        {name:'When Observed', hint:'Exact time, time window, or age of report'},
+        {name:'What Happened', hint:'Observed activity, object, contact, change, or report', multiline:true},
+        {name:'Intel Tags', hint:'Personnel, Recon, Location, Signal, Movement, Infrastructure, custom...'},
+        {name:'Reliability', hint:'Confirmed, likely, possible, unconfirmed, stale'},
+        {name:'Source Type', hint:'Direct observation, radio report, relay, passive RF, map, inference'},
+        {name:'Assessment', hint:'Why it matters or likely meaning', multiline:true},
+        {name:'Required Action', hint:'Monitor, verify, contact, avoid, dispatch, none'},
+        {name:'Notes', hint:'Extra context', multiline:true},
+    ],
+    WEATHER: [
+        {name:'Time', hint:'Time of observation'},
+        {name:'Temperature', hint:'°C, feel, trend'},
+        {name:'Wind', hint:'Direction, speed, gusts'},
+        {name:'Conditions', hint:'Clear, overcast, fog, rain, snow...'},
+        {name:'Visibility', hint:'km, good/limited/poor'},
+        {name:'Precipitation', hint:'None, light rain, heavy rain, snow, hail...'},
+        {name:'Pressure', hint:'hPa, rising/falling/stable'},
+        {name:'Forecast', hint:'Expected changes', multiline:true},
+        {name:'Notes', hint:'Extra weather context', multiline:true},
+    ],
+};
+
+// ── State ─────────────────────────────────────────────────────────────
+let _entries      = [];
+let _editId       = null;
+let _catFilter    = 'ALL';
+let _missionFilter = '';
+let _searchQuery  = '';
+let _missions     = [];
+let _gpsPos       = null;
+let _attachedGPS  = null;
+let _manualPos    = null;
+let _pickMode     = false;
+let _map          = null;
+let _gpsMarker    = null;
+let _entryLayers  = [];
+let _searchTimer  = null;
+let _gpsTimer     = null;
+let _accentPending = null;
+
+// ── Init ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    applySavedZoom();
+    applySavedAccent();
+    buildFilterBar();
+    renderFields('NOTE');
+    loadEntries();
+    loadMissions();
+    settingsLoadUpdateStatus(false);
+    pollGPS();
+    _gpsTimer = setInterval(pollGPS, 5000);
+});
+
+// ── Tabs ──────────────────────────────────────────────────────────────
+function showTab(name, el) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    if (el) el.classList.add('active');
+    if (name === 'map') initMap();
+    if (name === 'missions') renderMissionManager();
+}
+
+// ── GPS polling ───────────────────────────────────────────────────────
+async function pollGPS() {
+    try {
+        const r = await fetch('/api/gps');
+        const d = await r.json();
+        _gpsPos = d;
+        updateGPSBadge(d);
+    } catch (_) {
+        updateGPSBadge({ fix: false });
+    }
+}
+
+function updateGPSBadge(d) {
+    const dot  = document.getElementById('dot-gps');
+    const lbl  = document.getElementById('lbl-gps');
+    const mdot = document.getElementById('map-dot-gps');
+    const mtxt = document.getElementById('map-gps-text');
+
+    if (_manualPos) {
+        const txt = `Manual: ${_manualPos.lat.toFixed(5)}, ${_manualPos.lon.toFixed(5)}`;
+        dot.className = 'dot yellow';
+        lbl.textContent = txt;
+        if (mdot) mdot.className = 'dot yellow';
+        if (mtxt) mtxt.textContent = txt;
+        return;
+    }
+
+    if (d.fix && d.lat != null) {
+        const txt = `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}  ${d.sats||0}sat`;
+        dot.className  = 'dot green';
+        lbl.textContent = txt;
+        if (mdot) mdot.className = 'dot green';
+        if (mtxt) mtxt.textContent = txt;
+        if (_map && !_manualPos) {
+            if (_gpsMarker) _gpsMarker.setLatLng([d.lat, d.lon]);
+            else addGPSMarker(d.lat, d.lon);
+        }
+    } else {
+        dot.className  = 'dot red';
+        lbl.textContent = 'GPS no fix';
+        if (mdot) mdot.className = 'dot red';
+        if (mtxt) mtxt.textContent = 'No GPS fix';
+    }
+}
+
+// ── Composer ──────────────────────────────────────────────────────────
+function autoResizeTA(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 300) + 'px';
+}
+
+function renderFields(cat, values = {}) {
+    const container = document.getElementById('composer-fields');
+    const fields = FIELDS[cat];
+    if (!fields) {
+        container.innerHTML = `<textarea id="body-input" placeholder="Entry text..." oninput="autoResizeTA(this)" style="min-height:120px;width:100%;box-sizing:border-box"></textarea>`;
+        const ta = container.querySelector('textarea');
+        if (values._freeText) { ta.value = values._freeText; autoResizeTA(ta); }
+        return;
+    }
+    container.innerHTML = fields.map(f => `
+        <div class="field-row">
+            <label class="field-label">${f.name}</label>
+            ${f.multiline
+                ? `<textarea class="field-input" data-field="${escAttr(f.name)}" placeholder="${escAttr(f.hint)}" oninput="autoResizeTA(this)" rows="2"></textarea>`
+                : `<input type="text" class="field-input" data-field="${escAttr(f.name)}" placeholder="${escAttr(f.hint)}">`
+            }
+        </div>`).join('');
+    for (const [k, v] of Object.entries(values)) {
+        const el = container.querySelector(`[data-field="${escAttr(k)}"]`);
+        if (el) { el.value = v; if (el.tagName === 'TEXTAREA') autoResizeTA(el); }
+    }
+}
+
+function escAttr(s) { return s.replace(/"/g, '&quot;'); }
+
+function parseBodyToFields(body, cat) {
+    const fields = FIELDS[cat];
+    if (!fields) return { _freeText: body };
+    const values = {};
+    const lines = body.split('\n');
+    let key = null, buf = [];
+    for (const line of lines) {
+        const m = line.match(/^\*\*(.+?):\*\*\s*(.*)/);
+        if (m) {
+            if (key) values[key] = buf.join('\n').trim();
+            key = m[1]; buf = [m[2]];
+        } else if (key) {
+            buf.push(line);
+        }
+    }
+    if (key) values[key] = buf.join('\n').trim();
+    return values;
+}
+
+function assembleBody() {
+    const cat = document.getElementById('cat-select').value;
+    const fields = FIELDS[cat];
+    if (!fields) {
+        return document.getElementById('body-input')?.value.trim() || '';
+    }
+    const parts = [];
+    document.querySelectorAll('#composer-fields [data-field]').forEach(el => {
+        const val = el.value.trim();
+        if (val) parts.push(`**${el.dataset.field}:** ${val}`);
+    });
+    if (_attachedGPS) parts.push(`**GPS:** ${_attachedGPS}`);
+    return parts.join('\n');
+}
+
+function onCatChange() {
+    _attachedGPS = null;
+    document.getElementById('gps-line').style.display = 'none';
+    renderFields(document.getElementById('cat-select').value);
+}
+
+function insertNow() {
+    const now = new Date();
+    const hhmm = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+    const el = document.querySelector('#composer-fields [data-field="Time"]');
+    if (el) { el.value = hhmm; el.focus(); }
+    else {
+        const ta = document.getElementById('body-input');
+        if (ta) { ta.value = (ta.value ? ta.value + '\n' : '') + hhmm; autoResizeTA(ta); }
+    }
+}
+
+async function attachGPS() {
+    const pos = effectivePos();
+    if (!pos) { toast('No position (GPS or manual)', 'err'); return; }
+    _attachedGPS = `${pos.lat.toFixed(6)}, ${(pos.lon ?? pos.lng).toFixed(6)}`;
+    const line = document.getElementById('gps-line');
+    line.style.display = '';
+    line.textContent = `GPS: ${_attachedGPS}`;
+    toast('GPS attached', 'ok');
+}
+
+async function saveEntry() {
+    const body = assembleBody();
+    if (!body) { toast('Body required', 'err'); return; }
+
+    const cat      = document.getElementById('cat-select').value;
+    const mission  = document.getElementById('mission-input').value.trim();
+    const fullBody = mission ? `**Mission / Folder:** ${mission}\n${body}` : body;
+
+    const url    = _editId ? `/api/entries/${_editId}` : '/api/entries';
+    const method = _editId ? 'PUT' : 'POST';
+
+    try {
+        const r = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category: cat, body: fullBody }),
+        });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || 'Error saving', 'err'); return; }
+        toast(_editId ? 'Entry updated' : 'Entry saved', 'ok');
+        cancelEdit();
+        loadEntries();
+        loadMissions();
+    } catch (_) {
+        toast('Network error', 'err');
+    }
+}
+
+function editEntry(id) {
+    const e = _entries.find(x => x.id === id);
+    if (!e) return;
+
+    _editId = id;
+    _attachedGPS = null;
+    document.getElementById('gps-line').style.display = 'none';
+    document.getElementById('cat-select').value = e.category;
+    document.getElementById('mission-input').value = e.mission || '';
+
+    const body   = stripMissionLine(e.body || '');
+    const values = parseBodyToFields(body, e.category);
+    renderFields(e.category, values);
+
+    document.getElementById('composer-title').textContent = `Edit #${id}`;
+    document.getElementById('btn-cancel-edit').style.display = '';
+    document.getElementById('composer-panel').classList.add('editing');
+    document.getElementById('composer-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEdit() {
+    _editId = null;
+    _attachedGPS = null;
+    document.getElementById('gps-line').style.display = 'none';
+    document.getElementById('cat-select').value = 'NOTE';
+    document.getElementById('mission-input').value = '';
+    renderFields('NOTE');
+    document.getElementById('composer-title').textContent = 'New Entry';
+    document.getElementById('btn-cancel-edit').style.display = 'none';
+    document.getElementById('composer-panel').classList.remove('editing');
+}
+
+async function deleteEntry(id) {
+    if (!confirm('Delete this entry?')) return;
+    try {
+        await fetch(`/api/entries/${id}`, { method: 'DELETE' });
+        toast('Deleted', 'ok');
+        if (_editId === id) cancelEdit();
+        loadEntries();
+        loadMissions();
+    } catch (_) {
+        toast('Error deleting', 'err');
+    }
+}
+
+// ── Entries ───────────────────────────────────────────────────────────
+async function loadEntries() {
+    try {
+        const r = await fetch('/api/entries');
+        const all = await r.json();
+        _entries = all;
+        const el = document.getElementById('lbl-entries');
+        if (el) el.textContent = `${all.length} entries`;
+        renderEntries();
+        if (_map) updateMapEntries();
+    } catch (_) {
+        document.getElementById('dot-db').className = 'dot red';
+    }
+}
+
+function renderEntries() {
+    let list = _entries;
+    if (_catFilter && _catFilter !== 'ALL')
+        list = list.filter(e => e.category === _catFilter);
+    if (_missionFilter)
+        list = list.filter(e => (e.mission || '').toLowerCase() === _missionFilter.toLowerCase());
+    if (_searchQuery) {
+        const q = _searchQuery.toLowerCase();
+        list = list.filter(e => e.body.toLowerCase().includes(q));
+    }
+
+    const tl = document.getElementById('timeline');
+    if (!list.length) {
+        tl.innerHTML = '<div class="empty-state">No entries match the current filters.</div>';
+        return;
+    }
+    tl.innerHTML = list.map(renderEntry).join('');
+}
+
+function renderEntry(e) {
+    const dt  = formatTs(e.ts);
+    const cat = e.category || 'NOTE';
+    const hasGps = e.lat != null;
+    const gpsBtn = hasGps
+        ? `<span class="has-gps-badge" onclick="focusEntryOnMap(${e.lat},${e.lon})"
+               title="Show on map">&#9679; GPS</span>`
+        : '';
+    const missBtn = e.mission
+        ? `<span class="mission-badge" onclick="setMissionFilter('${jsSafe(e.mission)}')"
+               title="Filter by mission">${esc(e.mission)}</span>`
+        : '';
+    const isEditing = _editId === e.id ? ' editing' : '';
+
+    return `<div class="entry${isEditing}" id="entry-${e.id}">
+  <div class="entry-header">
+    <span class="entry-ts">${dt}</span>
+    <span class="cat-badge cat-${cat}">${cat}</span>
+    ${missBtn}${gpsBtn}
+    <div class="entry-actions">
+        <button class="btn btn-secondary btn-sm" onclick="editEntry(${e.id})">Edit</button>
+      <button class="btn btn-secondary btn-sm" onclick="duplicateEntry(${e.id})">Dup</button>
+      <button class="btn btn-danger btn-sm"    onclick="deleteEntry(${e.id})">Del</button>
+    </div>
+  </div>
+  <div class="entry-body">${renderBody(e.body)}</div>
+</div>`;
+}
+
+function renderBody(body) {
+    if (!body) return '<em style="color:var(--text-dim)">—</em>';
+    return body
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/\*\*(Mission|Mission \/ Folder):\*\*[^\n]*/gi, '') // hide mission line — shown as badge
+        .replace(/\*\*GPS:\*\*[^\n]*/g, '')     // hide raw GPS line — shown as badge
+        .replace(/\*\*([^*\n]+):\*\*/g,'<span class="field-key">$1:</span>')
+        .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
+        .replace(/\n{2,}/g,'<br><br>')
+        .replace(/\n/g,'<br>')
+        .trim();
+}
+
+// ── Filters ───────────────────────────────────────────────────────────
+function buildFilterBar() {
+    const row = document.getElementById('cat-filter-row');
+    row.innerHTML = ['ALL', ...CATS].map(c =>
+        `<button class="cat-filter${c==='ALL'?' active':''}" data-cat="${c}"
+                 onclick="setCatFilter('${c}',this)">${c}</button>`
+    ).join('');
+}
+
+function setCatFilter(cat, el) {
+    _catFilter = cat;
+    document.querySelectorAll('.cat-filter').forEach(b => b.classList.remove('active'));
+    if (el) el.classList.add('active');
+    renderEntries();
+}
+
+function setMissionFilter(val) {
+    _missionFilter = val;
+    const sel = document.getElementById('mission-filter');
+    if (sel) sel.value = val;
+    // Highlight mission chips
+    document.querySelectorAll('.mission-chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.mission === val);
+    });
+    renderEntries();
+}
+
+function debounceSearch(val) {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => { _searchQuery = val; renderEntries(); }, 250);
+}
+
+async function loadMissions() {
+    try {
+        const r = await fetch('/api/missions');
+        _missions = await r.json();
+        renderMissionsStrip();
+        updateMissionSelect();
+        updateMissionsDatalist();
+        renderMissionManager();
+    } catch (_) {}
+}
+
+function renderMissionsStrip() {
+    const strip = document.getElementById('missions-strip');
+    if (!_missions.length) { strip.innerHTML = ''; return; }
+    strip.innerHTML = _missions.map(m =>
+        `<span class="mission-chip${_missionFilter===m.name?' active':''}"
+               data-mission="${escAttr(m.name)}"
+               onclick="setMissionFilter('${jsSafe(m.name)}'===_missionFilter?'':'${jsSafe(m.name)}')"
+               >${esc(m.name)}<span class="mc">${m.count}</span
+               ><button class="mc-btn mc-edit" title="Rename" onclick="event.stopPropagation();renameMission('${jsSafe(m.name)}')">✎</button
+               ><button class="mc-btn mc-del" title="Remove mission tag from all entries" onclick="event.stopPropagation();deleteMission('${jsSafe(m.name)}')">×</button
+        ></span>`
+    ).join('');
+}
+
+function renderMissionManager() {
+    const list = document.getElementById('mission-manager-list');
+    if (!list) return;
+    if (!_missions.length) {
+        list.innerHTML = '<div class="empty-state">No Mission / Folder entries yet. Add a Mission / Folder name in the Log composer.</div>';
+        return;
+    }
+    list.innerHTML = _missions.map(m => {
+        const cats = Object.entries(m.categories || {})
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        const catHtml = cats.length
+            ? cats.map(([cat, n]) => `<span class="mission-cat cat-badge cat-${esc(cat)}">${esc(cat)} ${n}</span>`).join('')
+            : '<span class="status-label">No categories</span>';
+        return `<div class="mission-card">
+            <div class="mission-card-main">
+                <div class="mission-card-name">${esc(m.name)}</div>
+                <div class="mission-card-meta">${m.count} entr${m.count === 1 ? 'y' : 'ies'} · Last ${formatTs(m.last_ts || 0)}</div>
+                <div class="mission-card-cats">${catHtml}</div>
+            </div>
+            <div class="mission-card-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openMission('${jsSafe(m.name)}')">View</button>
+                <button class="btn btn-secondary btn-sm" onclick="renameMission('${jsSafe(m.name)}')">Rename</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteMission('${jsSafe(m.name)}')">Remove tag</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function openMission(name) {
+    setMissionFilter(name);
+    showTab('log', document.querySelector('.tab[onclick*="log"]'));
+}
+
+async function renameMission(name) {
+    const newName = prompt(`Rename mission "${name}" to:`, name);
+    if (!newName || newName.trim() === name) return;
+    try {
+        const r = await fetch('/api/missions/rename', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_name: name, new_name: newName.trim() }),
+        });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || 'Rename failed', 'err'); return; }
+        if (_missionFilter === name) _missionFilter = newName.trim();
+        toast(`Renamed — ${d.updated} entr${d.updated===1?'y':'ies'} updated`, 'ok');
+        loadEntries();
+        loadMissions();
+    } catch (_) { toast('Network error', 'err'); }
+}
+
+async function deleteMission(name) {
+    if (!confirm(`Remove mission tag "${name}" from all entries?\n\nEntries are kept, only the mission tag is removed.`)) return;
+    try {
+        const r = await fetch('/api/missions/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || 'Delete failed', 'err'); return; }
+        if (_missionFilter === name) { _missionFilter = ''; }
+        toast(`Tag removed from ${d.updated} entr${d.updated===1?'y':'ies'}`, 'ok');
+        loadEntries();
+        loadMissions();
+    } catch (_) { toast('Network error', 'err'); }
+}
+
+function updateMissionSelect() {
+    const sel = document.getElementById('mission-filter');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All missions</option>' +
+        _missions.map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${m.count})</option>`).join('');
+    sel.value = cur;
+}
+
+function updateMissionsDatalist() {
+    const dl = document.getElementById('missions-datalist');
+    dl.innerHTML = _missions.map(m => `<option value="${esc(m.name)}">`).join('');
+}
+
+function stripMissionLine(body) {
+    return String(body || '').replace(/^\*\*(Mission|Mission \/ Folder):\*\*[^\n]*\n?/i, '').trim();
+}
+
+function duplicateEntry(id) {
+    const e = _entries.find(x => x.id === id);
+    if (!e) return;
+    _editId = null;
+    _attachedGPS = null;
+    document.getElementById('gps-line').style.display = 'none';
+    document.getElementById('cat-select').value = e.category || 'NOTE';
+    document.getElementById('mission-input').value = e.mission || '';
+    const body = stripMissionLine(e.body || '');
+    renderFields(e.category || 'NOTE', parseBodyToFields(body, e.category || 'NOTE'));
+    document.getElementById('composer-title').textContent = `Duplicate #${id}`;
+    document.getElementById('btn-cancel-edit').style.display = '';
+    document.getElementById('composer-panel').classList.remove('editing');
+    document.getElementById('composer-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+
+// ── Map ───────────────────────────────────────────────────────────────
+function effectivePos() {
+    if (_manualPos) return _manualPos;
+    if (_gpsPos && _gpsPos.fix && _gpsPos.lat != null) return _gpsPos;
+    return null;
+}
+
+async function initMap() {
+    if (_map) { setTimeout(() => _map.invalidateSize(), 50); return; }
+
+    _map = L.map('map-container', { zoomControl: true }).setView([46.04, 14.50], 10);
+
+    // Map click handler for pick mode
+    _map.on('click', e => {
+        if (!_pickMode) return;
+        const { lat, lng } = e.latlng;
+        _manualPos = { lat, lon: lng };
+        document.getElementById('manual-lat').value = lat.toFixed(6);
+        document.getElementById('manual-lon').value = lng.toFixed(6);
+        updateManualPosStatus();
+        updateGPSMarker();
+        togglePickMode(false);
+    });
+
+    // Load layers from local API
+    let defaultLayer = null;
+    const baseLayers = {};
+
+    try {
+        const r = await fetch('/api/tile-layers', { signal: AbortSignal.timeout(2000) });
+        const all = await r.json();
+
+        all.forEach(l => {
+            const opts = {
+                maxZoom: 21,
+                maxNativeZoom: l.maxzoom || 18,
+                minZoom: l.minzoom || 0,
+                attribution: l.attribution || '',
+            };
+            if (l.url.includes('{s}')) opts.subdomains = 'abc';
+            const layer = L.tileLayer(l.url, opts);
+            baseLayers[l.name] = layer;
+            // Default: first local MBTiles, or dark_matter if no local
+            if (!defaultLayer && (l.type === 'local' || l.id === 'dark_matter'))
+                defaultLayer = layer;
+        });
+    } catch (_) {}
+
+    if (!defaultLayer) {
+        defaultLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap', maxZoom: 19, subdomains: 'abc',
+        });
+        baseLayers['OSM'] = defaultLayer;
+    }
+
+    defaultLayer.addTo(_map);
+    if (Object.keys(baseLayers).length > 1)
+        L.control.layers(baseLayers, {}, { position: 'topright' }).addTo(_map);
+
+    // Position marker
+    const pos = effectivePos();
+    if (pos) addGPSMarker(pos.lat, pos.lon || pos.lng);
+
+    updateMapEntries();
+}
+
+function addGPSMarker(lat, lon) {
+    if (_gpsMarker) _gpsMarker.setLatLng([lat, lon]);
+    else {
+        const icon = L.divIcon({
+            className: '',
+            html: '<div class="gps-pulse-outer"><div class="gps-pulse-inner"></div></div>',
+            iconSize: [20, 20], iconAnchor: [10, 10],
+        });
+        _gpsMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(_map);
+        _gpsMarker.bindPopup('<strong>Position</strong>');
+    }
+}
+
+function updateGPSMarker() {
+    if (!_map) return;
+    const pos = effectivePos();
+    if (pos) addGPSMarker(pos.lat, pos.lon || pos.lng);
+    else if (_gpsMarker) { _gpsMarker.remove(); _gpsMarker = null; }
+}
+
+function updateMapEntries() {
+    _entryLayers.forEach(m => m.remove());
+    _entryLayers = [];
+    _entries.forEach(e => {
+        if (e.lat == null) return;
+        const color = CAT_COLORS[e.category] || '#f59e0b';
+        const icon  = L.divIcon({
+            className: '',
+            html: `<div style="width:12px;height:12px;border-radius:50%;
+                        background:${color};border:2px solid #0a0a0a;
+                        box-shadow:0 0 5px ${color}88"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6],
+        });
+        const body = (e.body || '').replace(/\n/g,'<br>').substring(0, 120);
+        const dt   = formatTs(e.ts);
+        const m    = L.marker([e.lat, e.lon], { icon })
+            .addTo(_map)
+            .bindPopup(`<strong class="cat-badge cat-${e.category}">${e.category}</strong>
+                        <br><small>${dt}</small><br><br>${body}${e.body.length>120?'…':''}`);
+        _entryLayers.push(m);
+    });
+}
+
+function centerOnGPS() {
+    const pos = effectivePos();
+    if (!pos) { toast('No position fix', 'err'); return; }
+    initMap();
+    _map.setView([pos.lat, pos.lon || pos.lng], 15);
+}
+
+// ── Manual position ────────────────────────────────────────────────────
+function setManualPos() {
+    const lat = parseFloat(document.getElementById('manual-lat').value);
+    const lon = parseFloat(document.getElementById('manual-lon').value);
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        toast('Invalid coordinates', 'err'); return;
+    }
+    _manualPos = { lat, lon };
+    updateManualPosStatus();
+    updateGPSMarker();
+    closeBurger();
+    toast('Manual position set', 'ok');
+}
+
+function clearManualPos() {
+    _manualPos = null;
+    document.getElementById('manual-lat').value = '';
+    document.getElementById('manual-lon').value = '';
+    updateManualPosStatus();
+    updateGPSMarker();
+    toast('Manual position cleared', 'ok');
+}
+
+function updateManualPosStatus() {
+    const el = document.getElementById('manual-pos-status');
+    if (_manualPos) {
+        el.textContent = `Set: ${_manualPos.lat.toFixed(5)}, ${_manualPos.lon.toFixed(5)}`;
+        el.style.color = 'var(--accent)';
+    } else {
+        el.textContent = '';
+    }
+}
+
+function togglePickMode(force) {
+    _pickMode = force !== undefined ? force : !_pickMode;
+    const btn = document.getElementById('btn-pick-pos');
+    if (_pickMode) {
+        btn.classList.add('active');
+        btn.textContent = 'Click map…';
+        if (_map) _map.getContainer().style.cursor = 'crosshair';
+        closeBurger();
+        toast('Click map to set position', 'ok');
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = 'Pick Pos';
+        if (_map) _map.getContainer().style.cursor = '';
+    }
+}
+
+function focusEntryOnMap(lat, lon) {
+    showTab('map', document.querySelector('.tab[onclick*="map"]'));
+    setTimeout(() => { initMap(); _map.setView([lat, lon], 16); }, 100);
+}
+
+// ── Export / Import ───────────────────────────────────────────────────
+function exportData(fmt) {
+    window.open(`/api/export?fmt=${fmt}`, '_blank');
+}
+
+async function doImport() {
+    const raw = document.getElementById('import-input').value.trim();
+    if (!raw) { toast('Paste data first', 'err'); return; }
+    const st = document.getElementById('import-status');
+    st.textContent = 'Importing…';
+    try {
+        const r = await fetch('/api/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: raw }),
+        });
+        const d = await r.json();
+        if (!r.ok) { st.textContent = d.error || 'Error'; toast(d.error || 'Import failed', 'err'); return; }
+        st.textContent = `Imported ${d.imported}`;
+        toast(`Imported ${d.imported} entries`, 'ok');
+        document.getElementById('import-input').value = '';
+        loadEntries();
+        loadMissions();
+        loadStats();
+    } catch (_) {
+        st.textContent = 'Error';
+        toast('Network error', 'err');
+    }
+}
+
+async function loadStats() {
+    try {
+        const r = await fetch('/api/stats');
+        const d = await r.json();
+        const grid = document.getElementById('stats-grid');
+        if (!d.length) { grid.innerHTML = '<div class="status-label">No entries yet.</div>'; return; }
+        grid.innerHTML = d.map(s =>
+            `<div class="stats-item">
+               <span class="s-cat cat-badge cat-${s.category}">${s.category}</span>
+               <span class="s-cnt">${s.count}</span>
+             </div>`
+        ).join('');
+    } catch (_) {}
+}
+
+async function restartApp() {
+    closeBurger();
+    toast('Restarting…');
+    await fetch('/api/system/restart', { method: 'POST' }).catch(() => {});
+    setTimeout(() => location.reload(), 4000);
+}
+
+async function shutdownApp() {
+    if (!confirm('Shut down Field Log?')) return;
+    closeBurger();
+    await fetch('/api/system/stop', { method: 'POST' }).catch(() => {});
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;color:#6b7280;font-size:14px">Field Log stopped.</div>';
+}
+
+// ── App update ───────────────────────────────────────────────────────
+let _settingsUpdatePoll = null;
+
+function _updateSetButtons(info, state) {
+    const checkBtn = document.getElementById('settings-update-check-btn');
+    const runBtn = document.getElementById('settings-update-run-btn');
+    const restartBtn = document.getElementById('settings-update-restart-btn');
+    const running = !!state?.running;
+    if (checkBtn) {
+        checkBtn.disabled = running;
+        if (!running) checkBtn.textContent = 'Check';
+    }
+    if (runBtn) {
+        let disabledReason = '';
+        if (!info?.managed) disabledReason = 'This install is not managed by Git.';
+        else if (info?.dirty) disabledReason = 'Local file changes are present. Update is blocked until they are committed or cleaned.';
+        else if ((info?.ahead || 0) > 0) disabledReason = `Local commits are ahead of GitHub by ${info.ahead}. Push or reconcile first.`;
+        else if (!info?.update_available) disabledReason = 'No GitHub update is available.';
+        runBtn.disabled = running || !!disabledReason;
+        runBtn.textContent = running ? 'Updating...' : 'Update';
+        runBtn.title = running ? 'Update is running.' : (disabledReason || 'Pull the latest TOC-app code from GitHub.');
+    }
+    if (restartBtn) restartBtn.style.display = state?.ok && /Restart required/i.test(state?.message || '') ? '' : 'none';
+}
+
+function _renderUpdateStatus(payload) {
+    const info = payload?.info || {};
+    const state = payload?.state || {};
+    const summary = document.getElementById('settings-update-summary');
+    const logEl = document.getElementById('settings-update-log');
+    if (!summary) return;
+    if (payload?.error) {
+        summary.innerHTML = `<span style="color:var(--red)">${esc(payload.error)}</span>`;
+        _updateSetButtons(info, state);
+        return;
+    }
+    if (!info.managed) {
+        summary.innerHTML = `<span style="color:var(--text-dim)">${esc(info.error || 'This install is not managed by Git.')}</span>`;
+        _updateSetButtons(info, state);
+        return;
+    }
+    const parts = [
+        `Version <code>${esc(info.version || '0.0.0')}</code>`,
+        `Build <code>${esc(info.commit || '?')}</code>`,
+        info.remote_commit ? `GitHub <code>${esc(info.remote_commit)}</code>` : 'GitHub unknown',
+    ];
+    if (info.dirty) {
+        parts.push('<span style="color:var(--red)">local changes present</span>');
+        const dirty = (info.dirty_summary || []).slice(0, 5).map(x => esc(x)).join('<br>');
+        if (dirty) parts.push(`<span style="color:var(--text-dim)">Changed:<br>${dirty}</span>`);
+    } else if ((info.ahead || 0) > 0) {
+        parts.push(`<span style="color:var(--yellow)">ahead by ${info.ahead}</span>`);
+    } else if (info.update_available) {
+        parts.push(`<span style="color:var(--accent)">${info.behind} update${info.behind !== 1 ? 's' : ''} available</span>`);
+    } else {
+        parts.push('<span style="color:var(--green)">up to date</span>');
+    }
+    if (state.message) {
+        const color = state.ok === false ? 'var(--red)' : state.ok === true ? 'var(--green)' : 'var(--text-dim)';
+        parts.push(`<span style="color:${color}">${esc(state.message)}</span>`);
+    }
+    summary.innerHTML = parts.join(' · ');
+    if (logEl) {
+        const lines = Array.isArray(state.log) ? state.log : [];
+        logEl.style.display = lines.length ? '' : 'none';
+        logEl.textContent = lines.join('\n');
+        if (lines.length) logEl.scrollTop = logEl.scrollHeight;
+    }
+    _updateSetButtons(info, state);
+}
+
+async function settingsLoadUpdateStatus(fetchRemote = false, btn) {
+    const checkBtn = btn || document.getElementById('settings-update-check-btn');
+    const summary = document.getElementById('settings-update-summary');
+    if (checkBtn && fetchRemote) {
+        checkBtn.disabled = true;
+        checkBtn.textContent = 'Checking...';
+    }
+    if (summary && fetchRemote) summary.innerHTML = '<span style="color:var(--text-dim)">Checking GitHub...</span>';
+    try {
+        const r = await fetch(`/api/settings/update/status${fetchRemote ? '?fetch=1' : ''}`);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) data.error = data.error || `HTTP ${r.status}`;
+        _renderUpdateStatus(data);
+        if (data.state?.running && !_settingsUpdatePoll) {
+            _settingsUpdatePoll = setInterval(() => settingsLoadUpdateStatus(false), 1500);
+        }
+        if (!data.state?.running && _settingsUpdatePoll) {
+            clearInterval(_settingsUpdatePoll);
+            _settingsUpdatePoll = null;
+        }
+        if (fetchRemote && checkBtn) {
+            checkBtn.textContent = 'Checked';
+            setTimeout(() => { if (!checkBtn.disabled) checkBtn.textContent = 'Check'; }, 1800);
+        }
+    } catch (e) {
+        _renderUpdateStatus({ error: String(e.message || e) });
+        if (checkBtn) { checkBtn.textContent = 'Check'; checkBtn.disabled = false; }
+    } finally {
+        if (!fetchRemote && checkBtn) { checkBtn.textContent = 'Check'; checkBtn.disabled = false; }
+    }
+}
+
+async function runTocAppUpdate() {
+    await settingsLoadUpdateStatus(false);
+    const runBtn = document.getElementById('settings-update-run-btn');
+    if (runBtn?.disabled) {
+        toast(runBtn.title || 'Update is currently unavailable.', 'err');
+        return;
+    }
+    if (!confirm('Update TOC-app now? Local changes will block the update, and a restart will be required after a successful pull.')) return;
+    try {
+        const r = await fetch('/api/settings/update/run', { method: 'POST' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        await settingsLoadUpdateStatus(false);
+        if (!_settingsUpdatePoll) _settingsUpdatePoll = setInterval(() => settingsLoadUpdateStatus(false), 1500);
+    } catch (e) {
+        toast(String(e.message || e), 'err');
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function formatTs(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `${date}  ${time}`;
+}
+
+function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function jsSafe(s) {
+    return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
+}
+
+let _toastTimer = null;
+function toast(msg, type) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className   = 'show ' + (type || '');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => { el.className = ''; }, 2500);
+}
+
+// ── Burger / Zoom / Accent ─────────────────────────────────────────────
+function toggleBurger() {
+    document.getElementById('burger-panel').classList.toggle('open');
+}
+function closeBurger() {
+    document.getElementById('burger-panel').classList.remove('open');
+}
+document.addEventListener('click', e => {
+    const b = document.getElementById('burger-btn');
+    const p = document.getElementById('burger-panel');
+    if (!p.contains(e.target) && e.target !== b) p.classList.remove('open');
+});
+
+function getUiZoom() { return parseInt(document.getElementById('ui-zoom-slider').value); }
+function setUiZoom(v) {
+    v = Math.min(150, Math.max(70, parseInt(v)));
+    document.getElementById('ui-zoom-slider').value = v;
+    document.getElementById('ui-zoom-display').textContent = v + '%';
+    document.body.style.zoom = (v / 100);
+    localStorage.setItem('log_zoom', v);
+}
+function applySavedZoom() {
+    const z = parseInt(localStorage.getItem('log_zoom') || '100');
+    setUiZoom(z);
+}
+
+const ACCENT_PRESETS = ['#e8b04f','#4ade80','#58a6ff','#d29922','#f85149','#a855f7',
+                        '#14b8a6','#f97316','#84cc16','#06b6d4','#e5e7eb','#6b7280'];
+
+function applySavedAccent() {
+    const c = localStorage.getItem('log_accent') || '#e8b04f';
+    applyAccent(c);
+    document.getElementById('accent-swatch').style.background = c;
+}
+
+function applyAccent(c) {
+    const r   = parseInt(c.slice(1,3),16);
+    const g   = parseInt(c.slice(3,5),16);
+    const b   = parseInt(c.slice(5,7),16);
+    const dim = `${Math.round(r*.55)} ${Math.round(g*.55)} ${Math.round(b*.55)}`;
+    document.documentElement.style.setProperty('--accent', c);
+    document.documentElement.style.setProperty('--accent-dim', `rgb(${dim})`);
+    document.documentElement.style.setProperty('--accent-faint', `rgba(${r},${g},${b},0.10)`);
+    document.documentElement.style.setProperty('--accent-mid',   `rgba(${r},${g},${b},0.30)`);
+    document.documentElement.style.setProperty('--accent-bg',    `rgba(${r},${g},${b},0.07)`);
+}
+
+function openAccentPicker() {
+    const cur = localStorage.getItem('log_accent') || '#e8b04f';
+    _accentPending = cur;
+    const grid = document.getElementById('accent-preset-grid');
+    grid.innerHTML = ACCENT_PRESETS.map(c =>
+        `<div class="accent-preset${c===cur?' selected':''}" style="background:${c}"
+              onclick="previewAccent('${c}')" data-color="${c}"></div>`
+    ).join('');
+    document.getElementById('accent-custom-input').value  = cur;
+    document.getElementById('accent-hex-display').textContent = cur;
+    document.getElementById('accent-picker-overlay').classList.add('open');
+}
+
+function previewAccent(c) {
+    _accentPending = c;
+    applyAccent(c);
+    document.getElementById('accent-hex-display').textContent = c;
+    document.getElementById('accent-custom-input').value = c;
+    document.querySelectorAll('.accent-preset').forEach(el =>
+        el.classList.toggle('selected', el.dataset.color === c));
+}
+
+function confirmAccentColor() {
+    const c = _accentPending || '#f59e0b';
+    localStorage.setItem('log_accent', c);
+    document.getElementById('accent-swatch').style.background = c;
+    closeAccentPicker();
+}
+
+function resetAccentColor() {
+    const c = '#e8b04f';
+    localStorage.setItem('log_accent', c);
+    applyAccent(c);
+    document.getElementById('accent-swatch').style.background = c;
+    closeAccentPicker();
+}
+
+function closeAccentPicker() {
+    document.getElementById('accent-picker-overlay').classList.remove('open');
+    applySavedAccent(); // restore if cancelled
+}
+</script>
+</body>
+</html>
