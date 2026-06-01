@@ -31,6 +31,7 @@ OM_PREFS_DB = os.environ.get(
     )
 )
 OM_BASE_URL = os.environ.get('OM_BASE_URL', 'http://localhost:8082')
+MAP_APP_URL = os.environ.get('MAP_APP_URL', 'http://localhost:8090').rstrip('/')
 PORT = int(os.environ.get('TOC_APP_PORT', os.environ.get('LOG_APP_PORT', 5400)))
 MBTILES_DIR = Path(os.environ.get('TOC_APP_MBTILES_DIR',
                    os.environ.get('LOG_APP_MBTILES_DIR',
@@ -310,9 +311,27 @@ def api_status():
     try:
         with get_db() as conn:
             n = conn.execute('SELECT COUNT(*) FROM toc_log').fetchone()[0]
-        return jsonify({'ok': True, 'entries': n})
+        return jsonify({
+            'ok': True,
+            'entries': n,
+            'db_path': OM_PREFS_DB,
+            'shared_with': 'OM toc_log',
+            'om_url': OM_BASE_URL,
+            'map_app_url': MAP_APP_URL,
+        })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/integrations')
+def api_integrations():
+    return jsonify({
+        'ok': True,
+        'toc_db_path': OM_PREFS_DB,
+        'toc_table': 'toc_log',
+        'om_url': OM_BASE_URL,
+        'map_app_url': MAP_APP_URL,
+    })
 
 
 @app.route('/api/entries')
@@ -472,6 +491,80 @@ def api_gps():
         })
     except Exception:
         return jsonify({'fix': False, 'source': 'unavailable'})
+
+
+def _map_app_get(path, timeout=3):
+    url = f"{MAP_APP_URL}{path}"
+    r = requests.get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+@app.route('/api/map-app/status')
+def api_map_app_status():
+    try:
+        health = _map_app_get('/api/health')
+        tracks = _map_app_get('/api/tracks')
+        return jsonify({
+            'ok': True,
+            'url': MAP_APP_URL,
+            'health': health,
+            'tracks': len(tracks) if isinstance(tracks, list) else 0,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'url': MAP_APP_URL, 'error': str(e)}), 502
+
+
+@app.route('/api/map-app/tracks')
+def api_map_app_tracks():
+    try:
+        tracks = _map_app_get('/api/tracks')
+        return jsonify({'ok': True, 'url': MAP_APP_URL, 'tracks': tracks if isinstance(tracks, list) else []})
+    except Exception as e:
+        return jsonify({'ok': False, 'url': MAP_APP_URL, 'error': str(e), 'tracks': []}), 502
+
+
+@app.route('/api/map-app/tracks/<int:track_id>/log', methods=['POST'])
+def api_map_app_track_log(track_id):
+    d = request.get_json(silent=True) or {}
+    mission = (d.get('mission') or '').strip()
+    try:
+        tracks = _map_app_get('/api/tracks')
+    except Exception as e:
+        return jsonify({'error': f'Map-app unavailable: {e}'}), 502
+    track = next((t for t in tracks if int(t.get('id', -1)) == track_id), None)
+    if not track:
+        return jsonify({'error': 'Track not found in Map-app'}), 404
+
+    points = track.get('points') or []
+    start = points[0] if points else {}
+    end = points[-1] if points else {}
+    lines = []
+    if mission:
+        lines.append(f"**Mission / Folder:** {mission}")
+    lines.extend([
+        f"**Track:** {track.get('name') or f'Track {track_id}'}",
+        f"**Distance:** {round(float(track.get('distance_m') or 0))} m",
+        f"**Points:** {len(points)}",
+        f"**Source:** Map-app",
+        f"**GPX:** {MAP_APP_URL}/api/tracks/{track_id}/gpx",
+        f"**GeoJSON:** {MAP_APP_URL}/api/tracks/{track_id}/geojson",
+    ])
+    if start.get('lat') is not None and start.get('lon') is not None:
+        lines.append(f"**Start GPS:** {float(start['lat']):.6f}, {float(start['lon']):.6f}")
+    if end.get('lat') is not None and end.get('lon') is not None:
+        lines.append(f"**End GPS:** {float(end['lat']):.6f}, {float(end['lon']):.6f}")
+    if track.get('description'):
+        lines.append(f"**Notes:** {track['description']}")
+    body = "\n".join(lines)
+    ts = _norm_ts(track.get('ended_at') or track.get('updated_at'))
+    with get_db() as conn:
+        cur = conn.execute(
+            'INSERT INTO toc_log (ts, category, body) VALUES (?, ?, ?)',
+            (ts, 'POSITION', body)
+        )
+        eid = cur.lastrowid
+    return jsonify({'ok': True, **_annotate({'id': eid, 'ts': ts, 'category': 'POSITION', 'body': body})})
 
 
 @app.route('/api/export')

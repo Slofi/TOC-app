@@ -22,6 +22,7 @@
     </div>
     <div class="header-right">
         <a href="http://localhost:8082" target="_blank" class="btn btn-secondary btn-header">OM</a>
+        <a href="http://localhost:8090" target="_blank" class="btn btn-secondary btn-header">Map</a>
         <button class="btn-icon" id="burger-btn" onclick="toggleBurger()" title="Settings">&#9776;</button>
     </div>
 </header>
@@ -184,6 +185,17 @@
 
 <!-- ════════════════════════ MAP TAB ════ -->
 <div id="tab-map" class="tab-content">
+    <div class="map-app-panel">
+        <div class="map-app-main">
+            <div class="map-app-title">Map-app</div>
+            <div class="map-app-status" id="map-app-status">Checking Map-app...</div>
+        </div>
+        <div class="map-app-actions">
+            <a class="btn btn-secondary btn-sm" id="map-app-open" href="http://localhost:8090" target="_blank">Open Map-app</a>
+            <button class="btn btn-primary btn-sm" onclick="loadMapAppTracks()">Tracks</button>
+        </div>
+    </div>
+    <div id="map-app-tracks" class="map-app-tracks"></div>
     <div class="map-gps-bar">
         <span class="dot" id="map-dot-gps"></span>
         <span id="map-gps-text">GPS —</span>
@@ -361,6 +373,7 @@ let _entryLayers  = [];
 let _searchTimer  = null;
 let _gpsTimer     = null;
 let _accentPending = null;
+let _mapAppUrl    = 'http://localhost:8090';
 
 // ── Init ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -370,6 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFields('NOTE');
     loadEntries();
     loadMissions();
+    loadIntegrationStatus();
     settingsLoadUpdateStatus(false);
     pollGPS();
     _gpsTimer = setInterval(pollGPS, 5000);
@@ -381,8 +395,108 @@ function showTab(name, el) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('tab-' + name).classList.add('active');
     if (el) el.classList.add('active');
-    if (name === 'map') initMap();
+    if (name === 'map') { initMap(); loadMapAppStatus(); }
     if (name === 'missions') renderMissionManager();
+}
+
+// ── App integrations ─────────────────────────────────────────────────
+async function loadIntegrationStatus() {
+    try {
+        const r = await fetch('/api/integrations');
+        const d = await r.json();
+        if (d.map_app_url) {
+            _mapAppUrl = d.map_app_url;
+            const open = document.getElementById('map-app-open');
+            if (open) open.href = d.map_app_url;
+        }
+    } catch (_) {}
+}
+
+async function loadMapAppStatus() {
+    const status = document.getElementById('map-app-status');
+    if (!status) return;
+    status.textContent = 'Checking Map-app...';
+    try {
+        const r = await fetch('/api/map-app/status');
+        const d = await r.json();
+        if (d.url) {
+            _mapAppUrl = d.url;
+            const open = document.getElementById('map-app-open');
+            if (open) open.href = d.url;
+        }
+        status.textContent = d.ok
+            ? `Online - ${d.tracks || 0} track${d.tracks === 1 ? '' : 's'} - ${d.url}`
+            : `Offline - ${d.error || 'Map-app unavailable'}`;
+        status.classList.toggle('err', !d.ok);
+        if (d.ok) loadMapAppTracks();
+    } catch (e) {
+        status.textContent = `Offline - ${e.message}`;
+        status.classList.add('err');
+    }
+}
+
+async function loadMapAppTracks() {
+    const box = document.getElementById('map-app-tracks');
+    if (!box) return;
+    box.innerHTML = '<div class="empty-state compact">Loading Map-app tracks...</div>';
+    try {
+        const r = await fetch('/api/map-app/tracks');
+        const d = await r.json();
+        if (d.url) _mapAppUrl = d.url;
+        if (!r.ok || !d.ok) {
+            box.innerHTML = `<div class="empty-state compact">${esc(d.error || 'Map-app tracks unavailable')}</div>`;
+            return;
+        }
+        const tracks = d.tracks || [];
+        if (!tracks.length) {
+            box.innerHTML = '<div class="empty-state compact">No saved Map-app tracks yet.</div>';
+            return;
+        }
+        box.innerHTML = tracks.map(t => {
+            const id = Number(t.id);
+            const points = (t.points || []).length;
+            const dist = formatDistance(t.distance_m || 0);
+            return `<div class="map-track-row">
+                <div class="map-track-main">
+                    <div class="map-track-name">${esc(t.name || 'GPS track')}</div>
+                    <div class="map-track-meta">${points} pts - ${dist}</div>
+                </div>
+                <div class="map-track-actions">
+                    <a class="btn btn-secondary btn-sm" href="${_mapAppUrl}/api/tracks/${id}/gpx" target="_blank">GPX</a>
+                    <a class="btn btn-secondary btn-sm" href="${_mapAppUrl}/api/tracks/${id}/geojson" target="_blank">GeoJSON</a>
+                    <button class="btn btn-primary btn-sm" onclick="logMapAppTrack(${id})">Log</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        box.innerHTML = `<div class="empty-state compact">${esc(e.message)}</div>`;
+    }
+}
+
+async function logMapAppTrack(trackId) {
+    const mission = document.getElementById('mission-input')?.value?.trim()
+        || document.getElementById('mission-filter')?.value?.trim()
+        || '';
+    try {
+        const r = await fetch(`/api/map-app/tracks/${trackId}/log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mission }),
+        });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || 'Track log failed', 'err'); return; }
+        toast('Track logged to shared TOC/OM log', 'ok');
+        loadEntries();
+        loadMissions();
+    } catch (_) {
+        toast('Track log failed', 'err');
+    }
+}
+
+function formatDistance(meters) {
+    const n = Number(meters || 0);
+    if (n < 1000) return `${Math.round(n)} m`;
+    return `${(n / 1000).toFixed(n < 10000 ? 2 : 1)} km`;
 }
 
 // ── GPS polling ───────────────────────────────────────────────────────
